@@ -1,0 +1,47 @@
+//@version=5
+indicator("VWAP EMA Stack LINE Alert", overlay=true)
+
+alertSecret = input.string("change_this_to_match_ALERT_WEBHOOK_SECRET", "Webhook secret")
+rrText = input.string(">= 1:1.5", "Risk reward text")
+
+emaFast = ta.ema(close, 9)
+emaSlow = ta.ema(close, 21)
+vwapValue = ta.vwap(hlc3)
+
+emaFast1h = request.security(syminfo.tickerid, "60", ta.ema(close, 9))
+emaSlow1h = request.security(syminfo.tickerid, "60", ta.ema(close, 21))
+close1h = request.security(syminfo.tickerid, "60", close)
+vwap1h = request.security(syminfo.tickerid, "60", ta.vwap(hlc3))
+
+bullishBias = emaFast1h > emaSlow1h and close1h > vwap1h
+bearishBias = emaFast1h < emaSlow1h and close1h < vwap1h
+
+body = math.abs(close - open)
+candleRange = high - low
+lowerWick = math.min(open, close) - low
+upperWick = high - math.max(open, close)
+
+hasBullishRejection = candleRange > 0 and lowerWick >= body and close > open
+hasBearishRejection = candleRange > 0 and upperWick >= body and close < open
+
+touchTolerance = close * 0.001
+touchVwapOrEma21 = low <= vwapValue + touchTolerance and high >= vwapValue - touchTolerance or low <= emaSlow + touchTolerance and high >= emaSlow - touchTolerance
+
+longSetup = barstate.isconfirmed and bullishBias and emaFast > emaSlow and close > vwapValue and touchVwapOrEma21 and hasBullishRejection
+shortSetup = barstate.isconfirmed and bearishBias and emaFast < emaSlow and close < vwapValue and touchVwapOrEma21 and hasBearishRejection
+
+longMessage = '{"secret":"' + alertSecret + '","symbol":"' + syminfo.ticker + '","price":"' + str.tostring(close) + '","time":"{{time}}","timeframe":"15M","side":"LONG","setup":"VWAP Bounce EMA Stack","bias":"1H Bullish","entry":"' + str.tostring(close) + '","sl":"","tp":"","rr":"' + rrText + '","reasons":["1H bullish bias confirmed","EMA9 > EMA21","Price closed above VWAP","VWAP or EMA21 retest","15M bullish rejection confirmed"]}'
+shortMessage = '{"secret":"' + alertSecret + '","symbol":"' + syminfo.ticker + '","price":"' + str.tostring(close) + '","time":"{{time}}","timeframe":"15M","side":"SHORT","setup":"VWAP Bounce EMA Stack","bias":"1H Bearish","entry":"' + str.tostring(close) + '","sl":"","tp":"","rr":"' + rrText + '","reasons":["1H bearish bias confirmed","EMA9 < EMA21","Price closed below VWAP","VWAP or EMA21 retest","15M bearish rejection confirmed"]}'
+
+if longSetup
+    alert(longMessage, alert.freq_once_per_bar_close)
+
+if shortSetup
+    alert(shortMessage, alert.freq_once_per_bar_close)
+
+plot(vwapValue, "VWAP", color=color.yellow, linewidth=2)
+plot(emaFast, "EMA 9", color=color.green)
+plot(emaSlow, "EMA 21", color=color.orange)
+
+plotshape(longSetup, title="Long setup", style=shape.triangleup, location=location.belowbar, color=color.green, size=size.small, text="LONG")
+plotshape(shortSetup, title="Short setup", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small, text="SHORT")
