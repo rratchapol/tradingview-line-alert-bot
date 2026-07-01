@@ -1,0 +1,127 @@
+//@version=5
+strategy("VWAP EMA Stack Strategy Backtest v2", overlay=true, initial_capital=10000, commission_type=strategy.commission.percent, commission_value=0.05, pyramiding=0)
+
+// Backtest controls
+rr = input.float(1.5, "Risk Reward", minval=0.5, step=0.1)
+allowLong = input.bool(true, "Allow Long")
+allowShort = input.bool(true, "Allow Short")
+cooldownBars = input.int(12, "Cooldown bars after signal", minval=0)
+
+// Setup filters
+touchTolerancePct = input.float(0.10, "VWAP/EMA21 touch tolerance %", minval=0.01, step=0.01)
+minEmaDistancePct = input.float(0.03, "Minimum EMA9/EMA21 distance %", minval=0.0, step=0.01)
+useVwapSlopeFilter = input.bool(true, "Use VWAP slope filter")
+vwapSlopeBars = input.int(5, "VWAP slope lookback bars", minval=1)
+minVwapSlopePct = input.float(0.01, "Minimum VWAP slope %", minval=0.0, step=0.01)
+useAtrFilter = input.bool(true, "Use ATR volatility filter")
+atrLength = input.int(14, "ATR length", minval=1)
+minAtrPct = input.float(0.15, "Minimum ATR %", minval=0.0, step=0.01)
+
+// Stop controls
+stopMode = input.string("Signal candle", "Stop mode", options=["Signal candle", "VWAP buffer"])
+vwapStopBufferPct = input.float(0.35, "VWAP stop buffer %", minval=0.01, step=0.01)
+
+emaFast = ta.ema(close, 9)
+emaSlow = ta.ema(close, 21)
+vwapValue = ta.vwap(hlc3)
+atrValue = ta.atr(atrLength)
+
+emaFast1h = request.security(syminfo.tickerid, "60", ta.ema(close, 9))
+emaSlow1h = request.security(syminfo.tickerid, "60", ta.ema(close, 21))
+close1h = request.security(syminfo.tickerid, "60", close)
+vwap1h = request.security(syminfo.tickerid, "60", ta.vwap(hlc3))
+
+bullishBias = emaFast1h > emaSlow1h and close1h > vwap1h
+bearishBias = emaFast1h < emaSlow1h and close1h < vwap1h
+
+body = math.abs(close - open)
+candleRange = high - low
+lowerWick = math.min(open, close) - low
+upperWick = high - math.max(open, close)
+
+hasBullishRejection = candleRange > 0 and lowerWick >= body and close > open
+hasBearishRejection = candleRange > 0 and upperWick >= body and close < open
+
+touchTolerance = close * touchTolerancePct / 100
+touchVwap = low <= vwapValue + touchTolerance and high >= vwapValue - touchTolerance
+touchEma21 = low <= emaSlow + touchTolerance and high >= emaSlow - touchTolerance
+touchVwapOrEma21 = touchVwap or touchEma21
+
+emaDistancePct = math.abs(emaFast - emaSlow) / close * 100
+emaDistanceOk = emaDistancePct >= minEmaDistancePct
+
+vwapSlopePct = (vwapValue - vwapValue[vwapSlopeBars]) / close * 100
+vwapSlopeLongOk = not useVwapSlopeFilter or vwapSlopePct >= minVwapSlopePct
+vwapSlopeShortOk = not useVwapSlopeFilter or vwapSlopePct <= -minVwapSlopePct
+
+atrPct = atrValue / close * 100
+atrOk = not useAtrFilter or atrPct >= minAtrPct
+
+var int lastSignalBar = na
+canSignal = na(lastSignalBar) or bar_index - lastSignalBar > cooldownBars
+
+baseLongSetup = barstate.isconfirmed and allowLong and canSignal and bullishBias and emaFast > emaSlow and close > vwapValue and touchVwapOrEma21 and hasBullishRejection
+baseShortSetup = barstate.isconfirmed and allowShort and canSignal and bearishBias and emaFast < emaSlow and close < vwapValue and touchVwapOrEma21 and hasBearishRejection
+
+longSetup = baseLongSetup and emaDistanceOk and vwapSlopeLongOk and atrOk
+shortSetup = baseShortSetup and emaDistanceOk and vwapSlopeShortOk and atrOk
+
+longStopByCandle = low
+longStopByVwap = vwapValue * (1 - vwapStopBufferPct / 100)
+longStop = stopMode == "Signal candle" ? longStopByCandle : math.min(longStopByCandle, longStopByVwap)
+longRisk = close - longStop
+longTp = close + longRisk * rr
+
+shortStopByCandle = high
+shortStopByVwap = vwapValue * (1 + vwapStopBufferPct / 100)
+shortStop = stopMode == "Signal candle" ? shortStopByCandle : math.max(shortStopByCandle, shortStopByVwap)
+shortRisk = shortStop - close
+shortTp = close - shortRisk * rr
+
+validLongRisk = longRisk > syminfo.mintick
+validShortRisk = shortRisk > syminfo.mintick
+
+var float activeLongStop = na
+var float activeLongTp = na
+var float activeShortStop = na
+var float activeShortTp = na
+
+if longSetup and validLongRisk and strategy.position_size == 0
+    activeLongStop := longStop
+    activeLongTp := longTp
+    activeShortStop := na
+    activeShortTp := na
+    strategy.entry("LONG", strategy.long)
+    lastSignalBar := bar_index
+
+if shortSetup and validShortRisk and strategy.position_size == 0
+    activeShortStop := shortStop
+    activeShortTp := shortTp
+    activeLongStop := na
+    activeLongTp := na
+    strategy.entry("SHORT", strategy.short)
+    lastSignalBar := bar_index
+
+if strategy.position_size > 0
+    strategy.exit("LONG EXIT", "LONG", stop=activeLongStop, limit=activeLongTp)
+
+if strategy.position_size < 0
+    strategy.exit("SHORT EXIT", "SHORT", stop=activeShortStop, limit=activeShortTp)
+
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    activeLongStop := na
+    activeLongTp := na
+    activeShortStop := na
+    activeShortTp := na
+
+plot(vwapValue, "VWAP", color=color.yellow, linewidth=2)
+plot(emaFast, "EMA 9", color=color.green)
+plot(emaSlow, "EMA 21", color=color.orange)
+
+plotshape(longSetup, title="Long setup", style=shape.triangleup, location=location.belowbar, color=color.green, size=size.small, text="LONG")
+plotshape(shortSetup, title="Short setup", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small, text="SHORT")
+
+plot(strategy.position_size > 0 ? activeLongStop : na, "Long SL", color=color.red, style=plot.style_linebr)
+plot(strategy.position_size > 0 ? activeLongTp : na, "Long TP", color=color.green, style=plot.style_linebr)
+plot(strategy.position_size < 0 ? activeShortStop : na, "Short SL", color=color.red, style=plot.style_linebr)
+plot(strategy.position_size < 0 ? activeShortTp : na, "Short TP", color=color.green, style=plot.style_linebr)
