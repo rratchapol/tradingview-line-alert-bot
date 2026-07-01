@@ -37,22 +37,22 @@ function formatSignalMessage(payload) {
     ? payload.reasons.map((reason) => `- ${reason}`).join("\n")
     : payload.reason
       ? `- ${payload.reason}`
-      : "- Checklist passed";
+      : "- เงื่อนไขหลักผ่านครบ";
 
   return [
-    `${symbol} ${side} ALERT`,
+    `🚨 ${symbol} ${side} ALERT`,
     "",
-    `Setup: ${setup}`,
-    `Timeframe: ${timeframe}`,
-    `Price: ${price}`,
-    `Bias: ${bias}`,
-    `Entry: ${entry}`,
-    `SL: ${stopLoss}`,
-    `TP: ${takeProfit}`,
-    `R:R: ${rr}`,
-    `Time: ${time}`,
+    `📌 ระบบ: ${setup}`,
+    `⏱️ Timeframe: ${timeframe}`,
+    `💰 ราคาปัจจุบัน: ${price}`,
+    `🧭 Bias: ${bias}`,
+    `🎯 Entry: ${entry}`,
+    `🛑 Stop Loss: ${stopLoss}`,
+    `🏁 Take Profit: ${takeProfit}`,
+    `⚖️ Risk Plan: ${rr}`,
+    `🕒 เวลา: ${time}`,
     "",
-    "Checklist:",
+    "✅ เหตุผลเข้าเทรด:",
     reasons
   ].join("\n");
 }
