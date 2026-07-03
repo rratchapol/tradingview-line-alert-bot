@@ -14,7 +14,11 @@ function readPayload(req) {
   }
 
   if (typeof req.body === "string") {
-    return JSON.parse(req.body);
+    try {
+      return JSON.parse(req.body);
+    } catch {
+      return { rawMessage: req.body };
+    }
   }
 
   return {};
@@ -93,6 +97,13 @@ export default async function handler(req, res) {
   try {
     const payload = readPayload(req);
     const expectedSecret = getEnv("ALERT_WEBHOOK_SECRET");
+
+    if (!payload.secret) {
+      return res.status(400).json({
+        error: "Missing webhook secret",
+        hint: "Use TradingView condition 'Any alert() function call' and send the LINE JSON payload from alert(), not the PMT strategy order-fill JSON."
+      });
+    }
 
     if (payload.secret !== expectedSecret) {
       return res.status(401).json({ error: "Invalid webhook secret" });
